@@ -12,6 +12,8 @@ import {
 import {
   handleCanvasClick as handleRouteClick,
   clearRoute,
+  beginRouteDrag,
+  endRouteDrag,
 } from './route-planner.mjs';
 import {
   PARTY_TOKEN_NAME_SETTING,
@@ -50,33 +52,44 @@ Hooks.once('ready', () => {
 
 // === Scene Controls ===
 // Add our own "Journey" control group alongside token/measurement/etc.
+//
+// IMPORTANT: We use `button: true` (not toggle) for paint tools. Foundry's
+// toggle mechanism assumes each tool has independent state, but we have a
+// single global paintMode with radio-like behavior. Using button clicks and
+// driving state via paintMode + notifications gives us reliable behavior.
 Hooks.on('getSceneControlButtons', (controls) => {
+  const currentMode = getPaintMode();
+  const modeToTool = {
+    'route': 'orj-route',
+    'green': 'orj-paint-green',
+    'yellow': 'orj-paint-yellow',
+    'red': 'orj-paint-red',
+    'event': 'orj-paint-event',
+    'erase': 'orj-paint-erase',
+  };
+  const activeTool = modeToTool[currentMode];
+
   const paintTool = (key, title, icon, mode, gmOnly = true) => ({
     name: key,
     title,
     icon: `fa-solid ${icon}`,
-    toggle: true,
+    button: true,
     visible: gmOnly ? game.user.isGM : true,
-    active: getPaintMode() === mode,
-    onChange: (_event, active) => {
-      if (active) setPaintMode(mode);
-      else if (getPaintMode() === mode) clearPaintMode();
+    onChange: () => {
+      if (getPaintMode() === mode) {
+        clearPaintMode();
+      } else {
+        setPaintMode(mode);
+      }
+      // Re-render scene controls so activeTool reflects new paintMode
+      ui.controls?.render();
     },
   });
 
   const tools = {
     'orj-route': {
-      name: 'orj-route',
-      title: 'Journey: Route zeichnen',
-      icon: 'fa-solid fa-route',
-      toggle: true,
-      visible: true,
-      active: getPaintMode() === 'route',
+      ...paintTool('orj-route', 'Journey: Route zeichnen', 'fa-route', 'route', false),
       order: 0,
-      onChange: (_event, active) => {
-        if (active) setPaintMode('route');
-        else if (getPaintMode() === 'route') clearPaintMode();
-      },
     },
     'orj-paint-green':  { ...paintTool('orj-paint-green',  'Journey: Sicher malen',       'fa-leaf',    'green'),  order: 10 },
     'orj-paint-yellow': { ...paintTool('orj-paint-yellow', 'Journey: Wildnis malen',      'fa-tree',    'yellow'), order: 11 },
@@ -108,9 +121,9 @@ Hooks.on('getSceneControlButtons', (controls) => {
     title: 'Journey',
     icon: 'fa-solid fa-compass',
     layer: 'tokens',  // piggyback on token layer so clicks reach our handlers
-    activeTool: 'orj-route',
+    activeTool,
     visible: true,
-    order: 80,  // show after tokens/measurement/drawings
+    order: 80,
     tools,
   };
 });
@@ -129,23 +142,34 @@ async function resetJourney() {
 }
 
 // === Canvas click/drag handler ===
-// Attach to canvas listeners once canvas is ready.
-// Supports drag-paint: hold mouse button and drag across hexes.
+// Attach via DOM listeners on the canvas element (not PIXI stage) so we work
+// regardless of which scene-control layer is active. Hex grid coords are
+// computed via canvas.stage.toLocal() from the browser MouseEvent.
 Hooks.on('canvasReady', () => {
-  const stage = canvas.stage;
-  if (!stage) return;
+  const el = canvas.app?.view;
+  if (!el) return;
 
   // Remove previous listeners to avoid duplicates
-  const off = (ev, fn) => { if (fn) stage.off(ev, fn); };
-  off('pointerdown', canvas._orjDownHandler);
-  off('pointerup', canvas._orjUpHandler);
-  off('pointerupoutside', canvas._orjUpHandler);
-  off('pointermove', canvas._orjMoveHandler);
-  off('rightdown', canvas._orjRightHandler);
+  if (el._orjHandlers) {
+    const h = el._orjHandlers;
+    el.removeEventListener('pointerdown', h.down);
+    el.removeEventListener('pointermove', h.move);
+    el.removeEventListener('pointerup', h.up);
+    el.removeEventListener('pointerleave', h.up);
+    el.removeEventListener('contextmenu', h.context);
+  }
 
-  // Track which hex was last painted in the current drag, to avoid redundant paints
   let isDragging = false;
   let lastPaintedKey = null;
+
+  const eventToLocalPoint = (ev) => {
+    const rect = el.getBoundingClientRect();
+    const screenX = ev.clientX - rect.left;
+    const screenY = ev.clientY - rect.top;
+    // canvas.stage.toLocal converts browser-space → world-space
+    const world = canvas.stage.toLocal({ x: screenX, y: screenY }, null, undefined, true);
+    return world;
+  };
 
   const hexKeyAtPoint = (point) => {
     if (!canvas.grid || canvas.grid.type < 2) return null;
@@ -159,7 +183,7 @@ Hooks.on('canvasReady', () => {
     if (!mode) return;
     const info = hexKeyAtPoint(point);
     if (!info) return;
-    if (info.key === lastPaintedKey) return; // Already painted this hex in current drag
+    if (info.key === lastPaintedKey) return;
     lastPaintedKey = info.key;
 
     const syntheticEvent = { interactionData: { origin: point } };
@@ -170,58 +194,67 @@ Hooks.on('canvasReady', () => {
     }
   };
 
-  const downHandler = async (event) => {
+  const down = async (ev) => {
     const mode = getPaintMode();
     if (!mode) return;
-    if (event.data.button !== 0) return; // Left button only for drag-paint
+    // Left button only for paint/route-drag
+    if (ev.button !== 0) return;
     isDragging = true;
     lastPaintedKey = null;
-    const point = event.data.getLocalPosition(canvas.stage);
-    await paintAtPoint(point);
-    event.stopPropagation();
+
+    // Route mode: buffer starts empty for this drag. No add on pure click —
+    // the user must actually drag across at least one hex for anything to happen.
+    if (mode === 'route') {
+      beginRouteDrag();
+    } else {
+      // For paint modes, the very first hex under cursor gets painted immediately
+      const point = eventToLocalPoint(ev);
+      await paintAtPoint(point);
+    }
+    ev.preventDefault();
+    ev.stopPropagation();
   };
 
-  const moveHandler = async (event) => {
+  const move = async (ev) => {
     if (!isDragging) return;
     const mode = getPaintMode();
     if (!mode) return;
-    // Route mode: drag is less useful (would flood route with every hex). Only enable for paint modes.
-    if (mode === 'route') return;
-    const point = event.data.getLocalPosition(canvas.stage);
+    const point = eventToLocalPoint(ev);
     await paintAtPoint(point);
   };
 
-  const upHandler = async () => {
-    const wasDragging = isDragging;
+  const up = async () => {
+    const was = isDragging;
     isDragging = false;
     lastPaintedKey = null;
-    if (!wasDragging) return;
-    // If we just finished drag-painting event hexes, prompt once for the shared note
-    if (getPaintMode() === 'event') {
+    if (!was) return;
+    const mode = getPaintMode();
+    if (mode === 'route') {
+      // Commit buffered route drag to the scene in one shot
+      await endRouteDrag();
+    } else if (mode === 'event') {
       await flushPendingEventNotes();
     }
   };
 
-  const rightHandler = async (event) => {
+  const context = async (ev) => {
     const mode = getPaintMode();
     if (mode !== 'route') return;
-    const point = event.data.getLocalPosition(canvas.stage);
+    const point = eventToLocalPoint(ev);
     const syntheticEvent = { interactionData: { origin: point } };
     if (await handleRouteClick(syntheticEvent, true)) {
-      event.stopPropagation();
+      ev.preventDefault();
+      ev.stopPropagation();
     }
   };
 
-  stage.on('pointerdown', downHandler);
-  stage.on('pointermove', moveHandler);
-  stage.on('pointerup', upHandler);
-  stage.on('pointerupoutside', upHandler);
-  stage.on('rightdown', rightHandler);
+  el.addEventListener('pointerdown', down);
+  el.addEventListener('pointermove', move);
+  el.addEventListener('pointerup', up);
+  el.addEventListener('pointerleave', up);
+  el.addEventListener('contextmenu', context);
 
-  canvas._orjDownHandler = downHandler;
-  canvas._orjMoveHandler = moveHandler;
-  canvas._orjUpHandler = upHandler;
-  canvas._orjRightHandler = rightHandler;
+  el._orjHandlers = { down, move, up, context };
 });
 
 // === Chat card click listeners ===

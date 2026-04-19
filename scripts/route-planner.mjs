@@ -44,11 +44,13 @@ registerGMHandler('saveRoute', async ({ data }) => {
 });
 
 async function rebuildRouteVisualForScene(route, scene) {
-  // GM-only helper: directly manipulate drawings on a specific scene
-  const existingId = scene.getFlag(MODULE_ID, ROUTE_DRAWING_FLAG);
-  if (existingId) {
-    const existing = scene.drawings.get(existingId);
-    if (existing) await existing.delete();
+  // GM-only helper: directly manipulate drawings on a specific scene.
+  // Delete ALL drawings flagged as route visual to prevent orphans.
+  const toDelete = scene.drawings
+    .filter(d => d.getFlag(MODULE_ID, 'isRouteVisual'))
+    .map(d => d.id);
+  if (toDelete.length > 0) {
+    await scene.deleteEmbeddedDocuments('Drawing', toDelete);
   }
   if (!route || route.length < 2) {
     await scene.unsetFlag(MODULE_ID, ROUTE_DRAWING_FLAG);
@@ -98,15 +100,33 @@ async function rebuildRouteVisualForScene(route, scene) {
   await scene.setFlag(MODULE_ID, ROUTE_DRAWING_FLAG, drawing.id);
 }
 
+// In-memory buffer for drag-mode: add hexes fast, commit once on drag-end.
+let dragBuffer = null;
+
+export function beginRouteDrag() {
+  dragBuffer = [...getRoute()];
+}
+
+export async function endRouteDrag() {
+  if (dragBuffer === null) return;
+  const toCommit = dragBuffer;
+  dragBuffer = null;
+  await saveRoute(toCommit);
+}
+
 /**
- * Add a hex to the route (appended at end).
+ * Add a hex to the route. If currently dragging, only updates the buffer
+ * (no scene write) so movement stays responsive. Commit happens on drag-end.
  */
 export async function addHexToRoute(cube) {
+  if (dragBuffer !== null) {
+    const last = dragBuffer[dragBuffer.length - 1];
+    if (last && cubesEqual(last, cube)) return;
+    dragBuffer.push({ q: cube.q, r: cube.r, s: cube.s });
+    return;
+  }
   const route = getRoute();
-
-  // Don't add duplicate of last
   if (route.length > 0 && cubesEqual(route[route.length - 1], cube)) return;
-
   route.push({ q: cube.q, r: cube.r, s: cube.s });
   await saveRoute(route);
 }
@@ -115,6 +135,10 @@ export async function addHexToRoute(cube) {
  * Remove the last hex (right-click).
  */
 export async function removeLastHex() {
+  if (dragBuffer !== null) {
+    dragBuffer.pop();
+    return;
+  }
   const route = getRoute();
   if (route.length === 0) return;
   route.pop();
@@ -122,9 +146,23 @@ export async function removeLastHex() {
 }
 
 /**
- * Clear entire route.
+ * Clear entire route. GM-only helper called by the Reset button.
+ * Aggressively removes ANY drawings flagged as our route visual, even orphans.
  */
 export async function clearRoute() {
+  dragBuffer = null;
+
+  if (game.user.isGM && canvas.scene) {
+    // Delete every drawing on this scene that claims to be our route visual
+    const orphans = canvas.scene.drawings
+      .filter(d => d.getFlag(MODULE_ID, 'isRouteVisual'))
+      .map(d => d.id);
+    if (orphans.length > 0) {
+      await canvas.scene.deleteEmbeddedDocuments('Drawing', orphans);
+    }
+    await canvas.scene.unsetFlag(MODULE_ID, ROUTE_DRAWING_FLAG);
+  }
+
   await saveRoute([]);
 }
 
