@@ -1,0 +1,33 @@
+/**
+ * One Ring Journey — styles.
+ * Minimal custom CSS. Chat cards rely on native .pf2e.chat-card styling.
+ */
+
+/* DC-Adjust button group in event card footer */
+.chat-card[data-module="one-ring-journey"] .orj-dc-adjust {
+  display: flex;
+  gap: 4px;
+  align-items: center;
+  flex-wrap: wrap;
+}
+
+.chat-card[data-module="one-ring-journey"] .orj-dc-adjust > span {
+  font-size: 0.9em;
+  margin-right: 4px;
+}
+
+.chat-card[data-module="one-ring-journey"] .orj-dc-adjust button {
+  min-width: 36px;
+  padding: 2px 6px;
+  font-size: 0.85em;
+  flex: 0 0 auto;
+}
+
+/* Role assignment dialog — tighten the grid */
+.orj-role-assignment label {
+  justify-self: end;
+}
+
+.orj-role-assignment select {
+  width: 100%;
+}
