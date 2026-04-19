@@ -2,7 +2,7 @@
   "id": "one-ring-journey",
   "title": "One Ring Journey",
   "description": "Hex-based travel system adapted from The One Ring 2e for PF2E. Paint hex terrain, draw routes, automated marching tests, and event rolls with suspenseful timing.",
-  "version": "0.1.8",
+  "version": "0.1.9",
   "compatibility": {
     "minimum": "13",
     "verified": "13"

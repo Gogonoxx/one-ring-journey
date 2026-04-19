@@ -7,10 +7,14 @@
  */
 
 import { MODULE_ID, TERRAINS, ROLES, EVENTS, formatDCOffset } from './journey-data.mjs';
-import { renderEventStage2, renderEventResult, renderSkillPromptCard } from './chat-cards.mjs';
+import { renderEventStage2, renderEventResult, renderSkillPromptCard, renderJoyfulDiscoveryCard } from './chat-cards.mjs';
 import { rollEventDie } from './event-roller.mjs';
 import { performSkillRoll, handleMarchingRoll, deriveDoSFromTotal } from './marching-test.mjs';
-import { burnHitDiceForAll, applyDrainedToActor, burnHitDiceForActor } from './hit-dice-bridge.mjs';
+import {
+  burnHitDiceForAll, applyDrainedToActor, burnHitDiceForActor,
+  adjustNextMarchingModifier, regenerateBurntHitDiceForActor,
+  decreaseDrainedOnActor, getBurntHitDice, getDrainedValueForActor,
+} from './hit-dice-bridge.mjs';
 
 function getFlags(message) {
   return message.getFlag(MODULE_ID, 'stage') !== undefined
@@ -237,8 +241,9 @@ async function applyConsequences({ event, affectedActor, dos, skillName, rollTot
       case 5:
       case 6:
       case 7:
-      case 8: // Mishap → +1 day
-        consequences.push('+1 Tag zur Reise (neuer Marching Test folgt)');
+      case 8: // Mishap → nächster Marching Test bewegt 1 Hex weniger
+        await adjustNextMarchingModifier(-1);
+        consequences.push('Mishap: nächster Marching Test bewegt 1 Hex weniger');
         break;
     }
   }
@@ -246,11 +251,31 @@ async function applyConsequences({ event, affectedActor, dos, skillName, rollTot
   // Success bonuses (events 9-12)
   if (dos >= 2) {
     if (event.id === 9 || event.id === 10) {
-      consequences.push('Reise −1 Tag (kürzerer Pfad gefunden)');
+      // Short Cut: nächster Marching Test bewegt 1 Hex mehr
+      await adjustNextMarchingModifier(1);
+      consequences.push('Short Cut: nächster Marching Test bewegt 1 Hex mehr');
     } else if (event.id === 11) {
       consequences.push('Positive Begegnung (GM improvisiert)');
     } else if (event.id === 12) {
-      consequences.push('Alle: +2 verbrannte HD regeneriert ODER Drained −1 (Wahl pro PC)');
+      // Post a per-actor choice card with "heal HD" / "heal Drained" buttons
+      const roles = canvas.scene?.getFlag(MODULE_ID, 'roles') || {};
+      const actorIds = [...new Set(Object.values(roles).filter(Boolean))];
+      const actorsData = actorIds
+        .map(id => game.actors.get(id))
+        .filter(Boolean)
+        .map(a => ({
+          id: a.id,
+          name: a.name,
+          burnt: getBurntHitDice(a),
+          drained: getDrainedValueForActor(a),
+        }));
+      if (actorsData.length > 0) {
+        await ChatMessage.create({
+          speaker: { alias: 'Journey' },
+          content: renderJoyfulDiscoveryCard({ actors: actorsData }),
+        });
+      }
+      consequences.push('Alle: Wahl zwischen +2 verbrannte HD oder Drained −1 (siehe Karte oben)');
     }
   }
 
@@ -317,6 +342,41 @@ export function wireJourneyCardListeners(message, html) {
     try { await handleStartSkillCheck(message); }
     finally { startBtn.disabled = false; }
   });
+
+  // Joyful Discovery choice buttons (one row per actor)
+  for (const btn of card.querySelectorAll('[data-action="orj-jd-heal-hd"]')) {
+    btn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      btn.disabled = true;
+      const actor = game.actors.get(btn.dataset.actorId);
+      if (!actor) return;
+      const restored = await regenerateBurntHitDiceForActor(actor, 2);
+      // Disable the sibling button (drained) so the user can't double-dip
+      const row = btn.closest('.orj-jd-row');
+      row?.querySelectorAll('button').forEach(b => (b.disabled = true));
+      btn.textContent = `✓ +${restored} HD regeneriert`;
+      await ChatMessage.create({
+        speaker: ChatMessage.getSpeaker({ actor }),
+        content: `<p><strong>${foundry.utils.escapeHTML(actor.name)}</strong> regeneriert ${restored} verbrannte Hit Dice (Joyful Discovery).</p>`,
+      });
+    });
+  }
+  for (const btn of card.querySelectorAll('[data-action="orj-jd-heal-drained"]')) {
+    btn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      btn.disabled = true;
+      const actor = game.actors.get(btn.dataset.actorId);
+      if (!actor) return;
+      const newValue = await decreaseDrainedOnActor(actor);
+      const row = btn.closest('.orj-jd-row');
+      row?.querySelectorAll('button').forEach(b => (b.disabled = true));
+      btn.textContent = newValue === 0 ? '✓ Drained entfernt' : `✓ Drained ${newValue}`;
+      await ChatMessage.create({
+        speaker: ChatMessage.getSpeaker({ actor }),
+        content: `<p><strong>${foundry.utils.escapeHTML(actor.name)}</strong> reduziert Drained (Joyful Discovery).</p>`,
+      });
+    });
+  }
 
   // Skill-roll buttons on skill-prompt cards (marching test + event check)
   for (const btn of card.querySelectorAll('[data-action="orj-skill-roll"]')) {

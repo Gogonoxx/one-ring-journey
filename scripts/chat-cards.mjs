@@ -171,6 +171,39 @@ export function renderSkillPromptCard({ actor, role, skill1, skill1Mod, skill2, 
 }
 
 /**
+ * Joyful Discovery choice card — one button row per role-assigned actor,
+ * choosing between HD recovery and Drained reduction.
+ */
+export function renderJoyfulDiscoveryCard({ actors }) {
+  const rows = actors.map(a => `
+    <div class="orj-jd-row" data-actor-id="${escHtml(a.id)}" style="display: flex; align-items: center; gap: 6px; padding: 4px 0; border-bottom: 1px solid rgba(0,0,0,0.1);">
+      <strong style="flex: 1;">${escHtml(a.name)}</strong>
+      ${a.burnt > 0
+        ? `<button type="button" data-action="orj-jd-heal-hd" data-actor-id="${escHtml(a.id)}" title="Verbrannte HD: ${a.burnt}">+2 verbrannte HD</button>`
+        : `<button type="button" disabled title="Keine verbrannten HD">+2 verbrannte HD</button>`}
+      ${a.drained > 0
+        ? `<button type="button" data-action="orj-jd-heal-drained" data-actor-id="${escHtml(a.id)}" title="Drained: ${a.drained}">Drained −1</button>`
+        : `<button type="button" disabled title="Nicht Drained">Drained −1</button>`}
+    </div>
+  `).join('');
+
+  return `
+<div class="pf2e chat-card item-card" data-module="${MODULE_ID}" data-type="joyful-discovery">
+  <header class="card-header flexrow">
+    <img src="icons/svg/sun.svg" alt="Joyful Discovery" />
+    <h3>Joyful Discovery</h3>
+  </header>
+  <section class="tags paizo-style">
+    <span class="tag rarity rare">Bonus: Wahl pro PC</span>
+  </section>
+  <section class="card-content">
+    <p><em>Ein unerwartetes Licht im Dunkel. Jeder Rollen-Inhaber wählt seinen Bonus:</em></p>
+    ${rows}
+  </section>
+</div>`.trim();
+}
+
+/**
  * Event-hex trigger card — posted when party enters a black hex.
  */
 export function renderEventHexCard({ eventNote }) {

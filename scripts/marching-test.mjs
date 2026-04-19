@@ -17,6 +17,7 @@ import { getRoute } from './route-planner.mjs';
 import { findPartyToken, advancePartyToken, getPartyPositionIndex } from './party-token.mjs';
 import { rollAffectedRole, getEffectiveDC } from './event-roller.mjs';
 import { renderMarchingTestCard, renderEventStage1, renderEventHexCard, renderSkillPromptCard } from './chat-cards.mjs';
+import { getNextMarchingModifier, clearNextMarchingModifier } from './hit-dice-bridge.mjs';
 
 /**
  * Return the current role → actorId map. Empty object if nothing assigned.
@@ -191,7 +192,13 @@ export async function handleMarchingRoll(message, skillKey) {
 
   const dos = rollResult.degreeOfSuccess ?? deriveDoSFromTotal(rollResult.total, dc, rollResult.rawRoll);
   const outcome = MARCHING_RESULT[dos];
-  const hexes = outcome.hexes;
+
+  // Apply pending modifier from previous event (Mishap = -1, Short Cut = +1)
+  const pendingMod = getNextMarchingModifier();
+  const hexes = Math.max(1, outcome.hexes + pendingMod);
+  if (pendingMod !== 0) {
+    await clearNextMarchingModifier();
+  }
 
   // Post result card
   await ChatMessage.create({
