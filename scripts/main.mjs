@@ -155,11 +155,14 @@ Hooks.on('canvasReady', () => {
   // Remove previous listeners to avoid duplicates
   if (el._orjHandlers) {
     const h = el._orjHandlers;
-    el.removeEventListener('pointerdown', h.down, true);
-    el.removeEventListener('pointermove', h.move, true);
-    el.removeEventListener('pointerup', h.up, true);
-    el.removeEventListener('pointerleave', h.up, true);
-    el.removeEventListener('contextmenu', h.context, true);
+    el.removeEventListener('pointerdown', h.down);
+    el.removeEventListener('pointermove', h.move);
+    el.removeEventListener('pointerup', h.up);
+    el.removeEventListener('contextmenu', h.context);
+    if (h.globalUp) {
+      window.removeEventListener('pointerup', h.globalUp, true);
+      window.removeEventListener('blur', h.globalUp, true);
+    }
   }
 
   let isDragging = false;
@@ -204,42 +207,8 @@ Hooks.on('canvasReady', () => {
     return buf.map(c => canvas.grid.getCenterPoint(c));
   };
 
-  const down = async (ev) => {
-    const mode = getPaintMode();
-    if (!mode) return;
-    if (ev.button !== 0) return;
-    isDragging = true;
-    lastPaintedKey = null;
-
-    if (mode === 'route') {
-      beginRouteDrag();
-      clearPreview();
-    } else {
-      const point = eventToLocalPoint(ev);
-      await paintAtPoint(point);
-    }
-    // Block TokenLayer drag-select in capture phase
-    ev.preventDefault();
-    ev.stopImmediatePropagation();
-  };
-
-  const move = async (ev) => {
-    if (!isDragging) return;
-    const mode = getPaintMode();
-    if (!mode) return;
-    const point = eventToLocalPoint(ev);
-    await paintAtPoint(point);
-
-    // Live preview for route drag
-    if (mode === 'route') {
-      renderPreview(bufferCenters());
-    }
-
-    ev.preventDefault();
-    ev.stopImmediatePropagation();
-  };
-
-  const up = async (ev) => {
+  // End-drag state cleanup, safe to call multiple times
+  const endDragState = async () => {
     const was = isDragging;
     isDragging = false;
     lastPaintedKey = null;
@@ -251,13 +220,56 @@ Hooks.on('canvasReady', () => {
     } else if (mode === 'event') {
       await flushPendingEventNotes();
     }
-    ev?.preventDefault?.();
-    ev?.stopImmediatePropagation?.();
+  };
+
+  const down = async (ev) => {
+    const mode = getPaintMode();
+    if (!mode) return;
+    if (ev.button !== 0) return;
+
+    // Only react if the event actually started on the canvas itself.
+    // This prevents hijacking clicks on UI overlays (scene controls, sidebar).
+    if (ev.target !== el) return;
+
+    isDragging = true;
+    lastPaintedKey = null;
+
+    if (mode === 'route') {
+      beginRouteDrag();
+      clearPreview();
+    } else {
+      const point = eventToLocalPoint(ev);
+      await paintAtPoint(point);
+    }
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+  };
+
+  const move = async (ev) => {
+    if (!isDragging) return;
+    const mode = getPaintMode();
+    if (!mode) return;
+    const point = eventToLocalPoint(ev);
+    await paintAtPoint(point);
+
+    if (mode === 'route') {
+      renderPreview(bufferCenters());
+    }
+
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
+  };
+
+  const up = async (ev) => {
+    await endDragState();
+    // Only block propagation if we were actually dragging; otherwise let
+    // normal UI clicks through.
   };
 
   const context = async (ev) => {
     const mode = getPaintMode();
     if (mode !== 'route') return;
+    if (ev.target !== el) return;
     const point = eventToLocalPoint(ev);
     const syntheticEvent = { interactionData: { origin: point } };
     if (await handleRouteClick(syntheticEvent, true)) {
@@ -266,15 +278,21 @@ Hooks.on('canvasReady', () => {
     }
   };
 
-  // Register in CAPTURE phase (third arg true) so we run BEFORE the
-  // TokenLayer's bubble-phase handlers that spawn the selection marquee.
-  el.addEventListener('pointerdown', down, true);
-  el.addEventListener('pointermove', move, true);
-  el.addEventListener('pointerup', up, true);
-  el.addEventListener('pointerleave', up, true);
-  el.addEventListener('contextmenu', context, true);
+  // GLOBAL safety net: any pointerup anywhere in the window should end
+  // drag state, so clicks on UI elements don't leave us stuck.
+  const globalUp = () => { endDragState(); };
+  window.addEventListener('pointerup', globalUp, true);
+  window.addEventListener('blur', globalUp, true);
 
-  el._orjHandlers = { down, move, up, context };
+  // Canvas-specific handlers for the drag flow itself.
+  // NOT in capture phase anymore — we want to let the event bubble to UI
+  // overlays (scene controls) if we didn't start a drag on the canvas.
+  el.addEventListener('pointerdown', down);
+  el.addEventListener('pointermove', move);
+  el.addEventListener('pointerup', up);
+  el.addEventListener('contextmenu', context);
+
+  el._orjHandlers = { down, move, up, context, globalUp };
 });
 
 // === Chat card click listeners ===
