@@ -19,6 +19,7 @@ import {
 } from './party-token.mjs';
 import { startMarchingTest } from './marching-test.mjs';
 import { wireJourneyCardListeners } from './event-interaction.mjs';
+import { registerGMSocket } from './gm-socket.mjs';
 
 // === Settings ===
 Hooks.once('init', () => {
@@ -43,6 +44,8 @@ Hooks.once('ready', () => {
       clearPaintMode,
     };
   }
+  // Wire up GM socket relay so players can request route updates
+  registerGMSocket();
 });
 
 // === Scene Controls ===
