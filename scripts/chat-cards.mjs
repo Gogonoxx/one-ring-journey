@@ -21,7 +21,7 @@ export function renderMarchingTestCard({ guide, terrain, outcome, hexesAdvanced 
   return `
 <div class="pf2e chat-card item-card" data-module="${MODULE_ID}" data-type="marching-test">
   <header class="card-header flexrow">
-    <img src="icons/tools/navigation/compass-brass-worn.webp" alt="Marching Test" />
+    <img src="icons/svg/dice-target.svg" alt="Marching Test" />
     <h3>${escHtml(guide)} führt die Gruppe</h3>
   </header>
   <section class="tags paizo-style">
@@ -43,7 +43,7 @@ export function renderEventStage1({ terrain, role, actorName, messageFlagsJSON }
      data-terrain="${escHtml(terrain.key)}" data-role="${escHtml(role.key)}"
      data-flags='${escHtml(messageFlagsJSON)}'>
   <header class="card-header flexrow">
-    <img src="icons/magic/perception/eye-ringed-glow-angry-red.webp" alt="Journey Event" />
+    <img src="icons/svg/eye.svg" alt="Journey Event" />
     <h3>Journey Event</h3>
   </header>
   <section class="tags paizo-style">
@@ -147,7 +147,7 @@ export function renderSkillPromptCard({ actor, role, skill1, skill1Mod, skill2, 
   return `
 <div class="pf2e chat-card item-card" data-module="${MODULE_ID}" data-type="skill-prompt" data-prompt-id="${escHtml(promptId)}">
   <header class="card-header flexrow">
-    <img src="icons/skills/trades/navigation-map.webp" alt="Skill Check" />
+    <img src="icons/svg/dice-target.svg" alt="Skill Check" />
     <h3>${escHtml(context)}</h3>
   </header>
   <section class="tags paizo-style">
@@ -177,7 +177,7 @@ export function renderEventHexCard({ eventNote }) {
   return `
 <div class="pf2e chat-card item-card" data-module="${MODULE_ID}" data-type="event-hex">
   <header class="card-header flexrow">
-    <img src="icons/magic/symbols/rune-sigil-black-pink.webp" alt="Event Hex" />
+    <img src="icons/svg/explosion.svg" alt="Event Hex" />
     <h3>Event-Hex betreten</h3>
   </header>
   <section class="tags paizo-style">

@@ -9,7 +9,7 @@
 import { MODULE_ID, TERRAINS, ROLES, EVENTS, formatDCOffset } from './journey-data.mjs';
 import { renderEventStage2, renderEventResult, renderSkillPromptCard } from './chat-cards.mjs';
 import { rollEventDie } from './event-roller.mjs';
-import { performSkillRoll, handleMarchingRoll } from './marching-test.mjs';
+import { performSkillRoll, handleMarchingRoll, deriveDoSFromTotal } from './marching-test.mjs';
 import { burnHitDiceForAll, applyDrainedToActor, burnHitDiceForActor } from './hit-dice-bridge.mjs';
 
 function getFlags(message) {
@@ -167,13 +167,13 @@ async function handleEventSkillRoll(message, skillKey) {
   const event = EVENTS[flags.eventId];
   const effectiveDC = flags.dc;
 
-  const roll = await performSkillRoll(
+  const rollResult = await performSkillRoll(
     affectedActor,
     skillKey,
     effectiveDC,
     `${event.name}`,
   );
-  if (!roll) return;
+  if (!rollResult) return;
 
   // Consume the prompt
   try {
@@ -182,17 +182,14 @@ async function handleEventSkillRoll(message, skillKey) {
     await message.update({ flags: { [MODULE_ID]: { ...flags, consumed: true } } });
   }
 
-  const dos = roll.degreeOfSuccess ?? deriveDoS(roll, effectiveDC);
+  const dos = rollResult.degreeOfSuccess ?? deriveDoSFromTotal(rollResult.total, effectiveDC, rollResult.rawRoll);
 
-  // GM applies consequences (actor flags, conditions). If caller isn't GM,
-  // the effect only triggers via chat — the GM needs to apply HP changes.
-  // applyConsequences is guarded by GM checks inside hit-dice-bridge.
   await applyConsequences({
     event,
     affectedActor,
     dos,
     skillName: skillKey,
-    rollTotal: roll.total,
+    rollTotal: rollResult.total,
     effectiveDC,
   });
 }

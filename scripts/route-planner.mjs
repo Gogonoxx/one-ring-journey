@@ -36,11 +36,16 @@ async function saveRoute(route, sceneId) {
 }
 
 // Register GM-side handler for the socket relay
-registerGMHandler('saveRoute', async ({ data }) => {
+registerGMHandler('saveRoute', async ({ data, from }) => {
+  console.log(`[${MODULE_ID}] GM received saveRoute from player ${from}, route length ${data.route?.length}`);
   const scene = game.scenes.get(data.sceneId);
-  if (!scene) return;
+  if (!scene) {
+    console.warn(`[${MODULE_ID}] Scene ${data.sceneId} not found`);
+    return;
+  }
   await scene.setFlag(MODULE_ID, 'route', data.route);
   await rebuildRouteVisualForScene(data.route, scene);
+  console.log(`[${MODULE_ID}] GM saved route + rebuilt visual`);
 });
 
 /**

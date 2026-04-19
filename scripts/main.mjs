@@ -22,7 +22,7 @@ import {
   PARTY_TOKEN_NAME_SETTING,
   resetPartyPosition,
 } from './party-token.mjs';
-import { startMarchingTest } from './marching-test.mjs';
+import { startMarchingTest, promptRoleAssignment, getRoleAssignments } from './marching-test.mjs';
 import { wireJourneyCardListeners } from './event-interaction.mjs';
 import { registerGMSocket } from './gm-socket.mjs';
 
@@ -90,6 +90,15 @@ Hooks.on('getSceneControlButtons', (controls) => {
     'orj-paint-red':    { ...paintTool('orj-paint-red',    'Journey: Feindgebiet malen',  'fa-skull',   'red'),    order: 12 },
     'orj-paint-event':  { ...paintTool('orj-paint-event',  'Journey: Event-Hex malen',    'fa-bolt',    'event'),  order: 13 },
     'orj-paint-erase':  { ...paintTool('orj-paint-erase',  'Journey: Hex löschen',        'fa-eraser',  'erase'),  order: 14 },
+    'orj-roles': {
+      name: 'orj-roles',
+      title: 'Journey: Rollen zuweisen',
+      icon: 'fa-solid fa-users',
+      button: true,
+      visible: game.user.isGM,
+      order: 19,
+      onChange: () => editRoles(),
+    },
     'orj-marching-test': {
       name: 'orj-marching-test',
       title: 'Journey: Marching Test',
@@ -115,7 +124,7 @@ Hooks.on('getSceneControlButtons', (controls) => {
     title: 'Journey',
     icon: 'fa-solid fa-compass',
     layer: 'tokens',
-    activeTool: modeToTool[currentMode],
+    activeTool: modeToTool[currentMode] ?? 'orj-route',
     visible: true,
     order: 80,
     tools,
@@ -130,6 +139,16 @@ Hooks.on('activateSceneControls', (controls) => {
     ui.controls?.render();
   }
 });
+
+async function editRoles() {
+  if (!game.user.isGM) return;
+  if (!canvas.scene) return;
+  const current = getRoleAssignments();
+  const result = await promptRoleAssignment(current);
+  if (!result) return;
+  await canvas.scene.setFlag(MODULE_ID, 'roles', result);
+  ui.notifications.info('Journey: Rollen aktualisiert.');
+}
 
 async function resetJourney() {
   const confirm = await foundry.applications.api.DialogV2.confirm({

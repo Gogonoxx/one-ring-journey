@@ -90,7 +90,7 @@ export const EVENTS = [
   {
     id: 1,
     name: 'Terrible Misfortune',
-    icon: 'icons/magic/death/skull-horned-worn-fire-blue.webp',
+    icon: 'icons/svg/skull.svg',
     severity: 'rarity unique',
     hdBurnAll: 2,
     failConsequence: 'Alle werden Drained 1 (bis zur nächsten vollen Rast).',
@@ -100,7 +100,7 @@ export const EVENTS = [
   {
     id: 2,
     name: 'Despair',
-    icon: 'icons/magic/air/air-smoke-casting.webp',
+    icon: 'icons/svg/daze.svg',
     severity: 'rarity rare',
     hdBurnAll: 1,
     failConsequence: 'Das Ziel wird Drained 1 (bis zur nächsten vollen Rast).',
@@ -110,7 +110,7 @@ export const EVENTS = [
   {
     id: 3,
     name: 'Ill Choices',
-    icon: 'icons/environment/wilderness/arch-stone-moss.webp',
+    icon: 'icons/svg/trap.svg',
     severity: 'rarity rare',
     hdBurnAll: 1,
     failConsequence: 'Das Ziel verliert zusätzlich 1 HD.',
@@ -120,7 +120,7 @@ export const EVENTS = [
   {
     id: 4,
     name: 'Ill Choices',
-    icon: 'icons/environment/wilderness/arch-stone-moss.webp',
+    icon: 'icons/svg/trap.svg',
     severity: 'rarity rare',
     hdBurnAll: 1,
     failConsequence: 'Das Ziel verliert zusätzlich 1 HD.',
@@ -130,7 +130,7 @@ export const EVENTS = [
   {
     id: 5,
     name: 'Mishap',
-    icon: 'icons/environment/wilderness/tree-pine-oak.webp',
+    icon: 'icons/svg/tree.svg',
     severity: '',
     hdBurnAll: 1,
     failConsequence: '+1 Tag zur Reise (neuer Marching Test folgt).',
@@ -140,7 +140,7 @@ export const EVENTS = [
   {
     id: 6,
     name: 'Mishap',
-    icon: 'icons/environment/wilderness/tree-pine-oak.webp',
+    icon: 'icons/svg/tree.svg',
     severity: '',
     hdBurnAll: 1,
     failConsequence: '+1 Tag zur Reise (neuer Marching Test folgt).',
@@ -150,7 +150,7 @@ export const EVENTS = [
   {
     id: 7,
     name: 'Mishap',
-    icon: 'icons/environment/wilderness/tree-pine-oak.webp',
+    icon: 'icons/svg/tree.svg',
     severity: '',
     hdBurnAll: 1,
     failConsequence: '+1 Tag zur Reise (neuer Marching Test folgt).',
@@ -160,7 +160,7 @@ export const EVENTS = [
   {
     id: 8,
     name: 'Mishap',
-    icon: 'icons/environment/wilderness/tree-pine-oak.webp',
+    icon: 'icons/svg/tree.svg',
     severity: '',
     hdBurnAll: 1,
     failConsequence: '+1 Tag zur Reise (neuer Marching Test folgt).',
@@ -170,7 +170,7 @@ export const EVENTS = [
   {
     id: 9,
     name: 'Short Cut',
-    icon: 'icons/environment/settlement/path-dirt.webp',
+    icon: 'icons/svg/direction.svg',
     severity: 'rarity uncommon',
     hdBurnAll: 0,
     failConsequence: 'Keine Konsequenz.',
@@ -181,7 +181,7 @@ export const EVENTS = [
   {
     id: 10,
     name: 'Short Cut',
-    icon: 'icons/environment/settlement/path-dirt.webp',
+    icon: 'icons/svg/direction.svg',
     severity: 'rarity uncommon',
     hdBurnAll: 0,
     failConsequence: 'Keine Konsequenz.',
@@ -192,7 +192,7 @@ export const EVENTS = [
   {
     id: 11,
     name: 'Chance Meeting',
-    icon: 'icons/environment/people/commoner.webp',
+    icon: 'icons/svg/mystery-man.svg',
     severity: 'rarity uncommon',
     hdBurnAll: 0,
     failConsequence: 'Keine Konsequenz.',
@@ -203,7 +203,7 @@ export const EVENTS = [
   {
     id: 12,
     name: 'Joyful Discovery',
-    icon: 'icons/magic/holy/yin-yang-balance-symbol.webp',
+    icon: 'icons/svg/sun.svg',
     severity: 'rarity rare',
     hdBurnAll: 0,
     failConsequence: 'Keine Konsequenz.',

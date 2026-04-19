@@ -174,23 +174,22 @@ export async function handleMarchingRoll(message, skillKey) {
 
   const currentTerrain = flags.terrainKey || 'yellow';
   const dc = flags.dc;
-  const roll = await performSkillRoll(
+  const rollResult = await performSkillRoll(
     guideActor,
     skillKey,
     dc,
     `Marching Test (${TERRAINS[currentTerrain].label})`,
   );
-  if (!roll) return;
+  if (!rollResult) return;
 
   // Consume the prompt so it can't be clicked again
   try {
     await message.delete();
   } catch (err) {
-    // If players can't delete the message, just mark it
     await message.update({ flags: { [MODULE_ID]: { ...flags, consumed: true } } });
   }
 
-  const dos = roll.degreeOfSuccess ?? deriveDoSFromRoll(roll, dc);
+  const dos = rollResult.degreeOfSuccess ?? deriveDoSFromTotal(rollResult.total, dc, rollResult.rawRoll);
   const outcome = MARCHING_RESULT[dos];
   const hexes = outcome.hexes;
 
@@ -303,7 +302,11 @@ async function promptSkillChoice(actor, role) {
 
 /**
  * Perform a PF2E skill roll for an actor.
- * Returns the resulting Roll or null on cancel.
+ * Returns an object { total, degreeOfSuccess, rawRoll } or null on cancel.
+ *
+ * PF2E's Statistic.roll() returns a wrapper that has .degreeOfSuccess and .total
+ * directly on it. The inner Roll (if present) has no PF2E-specific fields, so
+ * don't unwrap.
  */
 export async function performSkillRoll(actor, skillKey, dc, label = '') {
   const stat = actor.skills?.[skillKey] ?? actor.perception;
@@ -317,8 +320,18 @@ export async function performSkillRoll(actor, skillKey, dc, label = '') {
       extraRollOptions: [`${MODULE_ID}:journey-check`],
       label,
     });
-    // stat.roll returns the Statistic.Roll, which wraps the actual Roll in `.roll`
-    return result?.roll ?? result;
+    if (!result) return null;
+
+    // The PF2E wrapper exposes degreeOfSuccess + total directly.
+    // Fall back to the inner Roll's total if needed.
+    const total = result.total ?? result.roll?.total ?? result.options?.total;
+    const dos = result.degreeOfSuccess ?? result.options?.outcome?.degreeOfSuccess;
+
+    return {
+      total,
+      degreeOfSuccess: dos,
+      rawRoll: result.roll ?? result,
+    };
   } catch (err) {
     console.error('One Ring Journey: skill roll failed', err);
     return null;
@@ -326,18 +339,16 @@ export async function performSkillRoll(actor, skillKey, dc, label = '') {
 }
 
 /**
- * Derive degree of success from a raw roll vs DC
- * Used only if PF2E doesn't attach degreeOfSuccess.
+ * Derive degree of success from a total vs DC (fallback only).
  */
-function deriveDoSFromRoll(roll, dc) {
-  const total = roll.total;
-  const natural = roll.dice?.[0]?.results?.[0]?.result ?? 10;
+export function deriveDoSFromTotal(total, dc, rawRoll) {
+  if (typeof total !== 'number') return 1;
+  const natural = rawRoll?.dice?.[0]?.results?.[0]?.result ?? 10;
   let dos;
   if (total >= dc + 10) dos = 3;
   else if (total >= dc) dos = 2;
   else if (total <= dc - 10) dos = 0;
   else dos = 1;
-  // Adjust for nat 1 / nat 20
   if (natural === 20) dos = Math.min(3, dos + 1);
   else if (natural === 1) dos = Math.max(0, dos - 1);
   return dos;
