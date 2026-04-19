@@ -186,7 +186,12 @@ async function rebuildRouteVisualForScene(route, scene) {
 let dragBuffer = null;
 
 export function beginRouteDrag() {
-  dragBuffer = [...getRoute()];
+  // Start fresh each drag — the previous route is replaced, not appended.
+  dragBuffer = [];
+}
+
+export function getDragBuffer() {
+  return dragBuffer;
 }
 
 export async function endRouteDrag() {
@@ -194,6 +199,10 @@ export async function endRouteDrag() {
   const toCommit = dragBuffer;
   dragBuffer = null;
   await saveRoute(toCommit);
+}
+
+export function cancelRouteDrag() {
+  dragBuffer = null;
 }
 
 /**

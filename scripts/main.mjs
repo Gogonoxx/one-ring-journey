@@ -14,7 +14,10 @@ import {
   clearRoute,
   beginRouteDrag,
   endRouteDrag,
+  getDragBuffer,
+  getRoute,
 } from './route-planner.mjs';
+import { renderPreview, clearPreview } from './route-preview.mjs';
 import {
   PARTY_TOKEN_NAME_SETTING,
   resetPartyPosition,
@@ -51,12 +54,7 @@ Hooks.once('ready', () => {
 });
 
 // === Scene Controls ===
-// Add our own "Journey" control group alongside token/measurement/etc.
-//
-// IMPORTANT: We use `button: true` (not toggle) for paint tools. Foundry's
-// toggle mechanism assumes each tool has independent state, but we have a
-// single global paintMode with radio-like behavior. Using button clicks and
-// driving state via paintMode + notifications gives us reliable behavior.
+// Toggle tools with `active` bound to paintMode for real button feedback.
 Hooks.on('getSceneControlButtons', (controls) => {
   const currentMode = getPaintMode();
   const modeToTool = {
@@ -67,21 +65,17 @@ Hooks.on('getSceneControlButtons', (controls) => {
     'event': 'orj-paint-event',
     'erase': 'orj-paint-erase',
   };
-  const activeTool = modeToTool[currentMode];
 
   const paintTool = (key, title, icon, mode, gmOnly = true) => ({
     name: key,
     title,
     icon: `fa-solid ${icon}`,
-    button: true,
+    toggle: true,
     visible: gmOnly ? game.user.isGM : true,
-    onChange: () => {
-      if (getPaintMode() === mode) {
-        clearPaintMode();
-      } else {
-        setPaintMode(mode);
-      }
-      // Re-render scene controls so activeTool reflects new paintMode
+    active: getPaintMode() === mode,
+    onChange: (_event, active) => {
+      if (active) setPaintMode(mode);
+      else if (getPaintMode() === mode) clearPaintMode();
       ui.controls?.render();
     },
   });
@@ -120,12 +114,21 @@ Hooks.on('getSceneControlButtons', (controls) => {
     name: 'one-ring-journey',
     title: 'Journey',
     icon: 'fa-solid fa-compass',
-    layer: 'tokens',  // piggyback on token layer so clicks reach our handlers
-    activeTool,
+    layer: 'tokens',
+    activeTool: modeToTool[currentMode],
     visible: true,
     order: 80,
     tools,
   };
+});
+
+// Clear paint mode when user switches away from the Journey tab
+Hooks.on('activateSceneControls', (controls) => {
+  const activeName = controls?.control?.name ?? controls?.activeControl;
+  if (activeName !== 'one-ring-journey' && getPaintMode()) {
+    clearPaintMode();
+    ui.controls?.render();
+  }
 });
 
 async function resetJourney() {
@@ -142,9 +145,9 @@ async function resetJourney() {
 }
 
 // === Canvas click/drag handler ===
-// Attach via DOM listeners on the canvas element (not PIXI stage) so we work
-// regardless of which scene-control layer is active. Hex grid coords are
-// computed via canvas.stage.toLocal() from the browser MouseEvent.
+// Attach via DOM listeners on the canvas element (not PIXI stage).
+// We register in CAPTURE phase so we can block the TokenLayer's
+// drag-select marquee before PIXI sees the event.
 Hooks.on('canvasReady', () => {
   const el = canvas.app?.view;
   if (!el) return;
@@ -152,11 +155,11 @@ Hooks.on('canvasReady', () => {
   // Remove previous listeners to avoid duplicates
   if (el._orjHandlers) {
     const h = el._orjHandlers;
-    el.removeEventListener('pointerdown', h.down);
-    el.removeEventListener('pointermove', h.move);
-    el.removeEventListener('pointerup', h.up);
-    el.removeEventListener('pointerleave', h.up);
-    el.removeEventListener('contextmenu', h.context);
+    el.removeEventListener('pointerdown', h.down, true);
+    el.removeEventListener('pointermove', h.move, true);
+    el.removeEventListener('pointerup', h.up, true);
+    el.removeEventListener('pointerleave', h.up, true);
+    el.removeEventListener('contextmenu', h.context, true);
   }
 
   let isDragging = false;
@@ -194,25 +197,30 @@ Hooks.on('canvasReady', () => {
     }
   };
 
+  // Build the list of world-space centers currently in the drag buffer,
+  // used for live preview rendering.
+  const bufferCenters = () => {
+    const buf = getDragBuffer() ?? [];
+    return buf.map(c => canvas.grid.getCenterPoint(c));
+  };
+
   const down = async (ev) => {
     const mode = getPaintMode();
     if (!mode) return;
-    // Left button only for paint/route-drag
     if (ev.button !== 0) return;
     isDragging = true;
     lastPaintedKey = null;
 
-    // Route mode: buffer starts empty for this drag. No add on pure click —
-    // the user must actually drag across at least one hex for anything to happen.
     if (mode === 'route') {
       beginRouteDrag();
+      clearPreview();
     } else {
-      // For paint modes, the very first hex under cursor gets painted immediately
       const point = eventToLocalPoint(ev);
       await paintAtPoint(point);
     }
+    // Block TokenLayer drag-select in capture phase
     ev.preventDefault();
-    ev.stopPropagation();
+    ev.stopImmediatePropagation();
   };
 
   const move = async (ev) => {
@@ -221,20 +229,30 @@ Hooks.on('canvasReady', () => {
     if (!mode) return;
     const point = eventToLocalPoint(ev);
     await paintAtPoint(point);
+
+    // Live preview for route drag
+    if (mode === 'route') {
+      renderPreview(bufferCenters());
+    }
+
+    ev.preventDefault();
+    ev.stopImmediatePropagation();
   };
 
-  const up = async () => {
+  const up = async (ev) => {
     const was = isDragging;
     isDragging = false;
     lastPaintedKey = null;
     if (!was) return;
     const mode = getPaintMode();
     if (mode === 'route') {
-      // Commit buffered route drag to the scene in one shot
+      clearPreview();
       await endRouteDrag();
     } else if (mode === 'event') {
       await flushPendingEventNotes();
     }
+    ev?.preventDefault?.();
+    ev?.stopImmediatePropagation?.();
   };
 
   const context = async (ev) => {
@@ -244,15 +262,17 @@ Hooks.on('canvasReady', () => {
     const syntheticEvent = { interactionData: { origin: point } };
     if (await handleRouteClick(syntheticEvent, true)) {
       ev.preventDefault();
-      ev.stopPropagation();
+      ev.stopImmediatePropagation();
     }
   };
 
-  el.addEventListener('pointerdown', down);
-  el.addEventListener('pointermove', move);
-  el.addEventListener('pointerup', up);
-  el.addEventListener('pointerleave', up);
-  el.addEventListener('contextmenu', context);
+  // Register in CAPTURE phase (third arg true) so we run BEFORE the
+  // TokenLayer's bubble-phase handlers that spawn the selection marquee.
+  el.addEventListener('pointerdown', down, true);
+  el.addEventListener('pointermove', move, true);
+  el.addEventListener('pointerup', up, true);
+  el.addEventListener('pointerleave', up, true);
+  el.addEventListener('contextmenu', context, true);
 
   el._orjHandlers = { down, move, up, context };
 });
