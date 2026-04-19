@@ -214,11 +214,16 @@ async function applyConsequences({ event, affectedActor, dos, skillName, rollTot
   // Failure / Crit Failure consequences
   if (dos <= 1) {
     switch (event.id) {
-      case 1: // Terrible Misfortune → all drained 1
-        for (const actor of game.actors.filter(a => a.type === 'character' && a.hasPlayerOwner)) {
-          await applyDrainedToActor(actor, 1);
+      case 1: // Terrible Misfortune → all drained 1 (only assigned roles)
+        {
+          const roles = canvas.scene?.getFlag(MODULE_ID, 'roles') || {};
+          const actorIds = [...new Set(Object.values(roles).filter(Boolean))];
+          for (const id of actorIds) {
+            const actor = game.actors.get(id);
+            if (actor) await applyDrainedToActor(actor, 1);
+          }
         }
-        consequences.push('Alle: Drained 1 (bis volle Rast)');
+        consequences.push('Alle (Rollen-Inhaber): Drained 1 (bis volle Rast)');
         break;
       case 2: // Despair → target drained 1
         await applyDrainedToActor(affectedActor, 1);

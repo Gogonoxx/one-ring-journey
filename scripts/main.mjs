@@ -124,7 +124,7 @@ Hooks.on('getSceneControlButtons', (controls) => {
     title: 'Journey',
     icon: 'fa-solid fa-compass',
     layer: 'tokens',
-    activeTool: modeToTool[currentMode] ?? 'orj-route',
+    activeTool: modeToTool[currentMode] ?? null,
     visible: true,
     order: 80,
     tools,

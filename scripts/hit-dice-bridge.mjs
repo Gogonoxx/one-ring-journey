@@ -37,12 +37,17 @@ export async function regenerateBurntHitDiceForActor(actor, amount) {
 }
 
 /**
- * Apply burn to every player-owned character on any scene.
+ * Apply burn to the characters currently assigned to the 4 journey roles.
+ * Duplicates (same actor in multiple roles) are de-duplicated so they only
+ * burn once per event.
  */
 export async function burnHitDiceForAll(amount) {
-  const actors = game.actors.filter(a => a.type === 'character' && a.hasPlayerOwner);
-  for (const actor of actors) {
-    await burnHitDiceForActor(actor, amount);
+  if (!canvas.scene) return;
+  const roles = canvas.scene.getFlag(MODULE_ID, 'roles') || {};
+  const actorIds = [...new Set(Object.values(roles).filter(Boolean))];
+  for (const id of actorIds) {
+    const actor = game.actors.get(id);
+    if (actor) await burnHitDiceForActor(actor, amount);
   }
 }
 
