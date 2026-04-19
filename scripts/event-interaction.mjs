@@ -7,9 +7,9 @@
  */
 
 import { MODULE_ID, TERRAINS, ROLES, EVENTS, formatDCOffset } from './journey-data.mjs';
-import { renderEventStage2, renderEventResult } from './chat-cards.mjs';
+import { renderEventStage2, renderEventResult, renderSkillPromptCard } from './chat-cards.mjs';
 import { rollEventDie } from './event-roller.mjs';
-import { performSkillRoll } from './marching-test.mjs';
+import { performSkillRoll, handleMarchingRoll } from './marching-test.mjs';
 import { burnHitDiceForAll, applyDrainedToActor, burnHitDiceForActor } from './hit-dice-bridge.mjs';
 
 function getFlags(message) {
@@ -85,8 +85,10 @@ async function handleDCAdjust(message, delta) {
 }
 
 /**
- * Start the skill check for the affected actor.
- * Triggers automatic skill roll with current effective DC.
+ * GM clicked "Skill-Check starten" on a stage-2 event card.
+ * Instead of triggering a roll directly (which removes player agency),
+ * we post a skill-prompt chat card. The affected player clicks their
+ * own skill button there to roll.
  */
 async function handleStartSkillCheck(message) {
   if (!game.user.isGM) return;
@@ -103,34 +105,88 @@ async function handleStartSkillCheck(message) {
 
   const effectiveDC = flags.baseDC + (flags.dcOffset || 0);
 
-  // Build skill choice buttons so player picks their skill
-  const skillMods = role.skills.map(s => {
-    const stat = affectedActor.skills?.[s] ?? affectedActor.perception;
-    return { key: s, label: s.charAt(0).toUpperCase() + s.slice(1), mod: stat?.mod ?? 0 };
+  const skill1 = role.skills[0];
+  const skill2 = role.skills[1];
+  const skill1Mod = (affectedActor.skills?.[skill1] ?? affectedActor.perception)?.mod ?? 0;
+  const skill2Mod = (affectedActor.skills?.[skill2] ?? affectedActor.perception)?.mod ?? 0;
+
+  const promptId = `event-check-${foundry.utils.randomID()}`;
+
+  await ChatMessage.create({
+    speaker: ChatMessage.getSpeaker({ actor: affectedActor }),
+    content: renderSkillPromptCard({
+      actor: affectedActor.name,
+      role: role.label,
+      skill1, skill1Mod, skill2, skill2Mod,
+      dc: effectiveDC,
+      context: `${event.name} — ${role.label}`,
+      flavor: `${affectedActor.name} muss einen Skill-Check machen gegen ${event.name}.`,
+      promptId,
+    }),
+    flags: {
+      [MODULE_ID]: {
+        promptType: 'event-check',
+        promptId,
+        actorId: affectedActor.id,
+        dc: effectiveDC,
+        eventId: flags.eventId,
+        roleKey: flags.roleKey,
+        parentMessageId: message.id,
+      },
+    },
   });
 
-  const skillKey = await foundry.applications.api.DialogV2.wait({
-    window: { title: `${role.label}: Skill wählen (${affectedActor.name})` },
-    content: `<p style="padding: 8px 0;">Welchen Skill benutzt ${foundry.utils.escapeHTML(affectedActor.name)} für das Event?</p>`,
-    buttons: skillMods.map(sm => ({
-      action: sm.key,
-      label: `${sm.label} (${sm.mod >= 0 ? '+' : ''}${sm.mod})`,
-      callback: () => sm.key,
-    })),
-    rejectClose: false,
-    modal: true,
+  // Mark the stage-2 message as awaiting player roll
+  await message.update({
+    flags: {
+      [MODULE_ID]: {
+        ...flags,
+        stage: 2.5,
+        awaitingPlayerRoll: true,
+      },
+    },
   });
-  if (!skillKey) return;
+}
+
+/**
+ * Player clicked a skill button on an event-check prompt card.
+ * Rolls their chosen skill, applies consequences.
+ */
+async function handleEventSkillRoll(message, skillKey) {
+  const flags = message.flags?.[MODULE_ID];
+  if (!flags || flags.promptType !== 'event-check') return;
+
+  const affectedActor = game.actors.get(flags.actorId);
+  if (!affectedActor) return;
+
+  if (!affectedActor.isOwner) {
+    ui.notifications.warn('Nur der betroffene Spieler kann diesen Check würfeln.');
+    return;
+  }
+
+  const event = EVENTS[flags.eventId];
+  const effectiveDC = flags.dc;
 
   const roll = await performSkillRoll(
     affectedActor,
     skillKey,
     effectiveDC,
-    `${event.name} — ${role.label}`
+    `${event.name}`,
   );
   if (!roll) return;
 
+  // Consume the prompt
+  try {
+    await message.delete();
+  } catch (err) {
+    await message.update({ flags: { [MODULE_ID]: { ...flags, consumed: true } } });
+  }
+
   const dos = roll.degreeOfSuccess ?? deriveDoS(roll, effectiveDC);
+
+  // GM applies consequences (actor flags, conditions). If caller isn't GM,
+  // the effect only triggers via chat — the GM needs to apply HP changes.
+  // applyConsequences is guarded by GM checks inside hit-dice-bridge.
   await applyConsequences({
     event,
     affectedActor,
@@ -138,17 +194,6 @@ async function handleStartSkillCheck(message) {
     skillName: skillKey,
     rollTotal: roll.total,
     effectiveDC,
-  });
-
-  // Mark message as resolved
-  await message.update({
-    flags: {
-      [MODULE_ID]: {
-        ...flags,
-        stage: 3,
-        resolvedAt: Date.now(),
-      },
-    },
   });
 }
 
@@ -270,4 +315,23 @@ export function wireJourneyCardListeners(message, html) {
     try { await handleStartSkillCheck(message); }
     finally { startBtn.disabled = false; }
   });
+
+  // Skill-roll buttons on skill-prompt cards (marching test + event check)
+  for (const btn of card.querySelectorAll('[data-action="orj-skill-roll"]')) {
+    btn.addEventListener('click', async (ev) => {
+      ev.preventDefault();
+      const skillKey = btn.dataset.skill;
+      btn.disabled = true;
+      try {
+        const promptType = message.flags?.[MODULE_ID]?.promptType;
+        if (promptType === 'marching-test') {
+          await handleMarchingRoll(message, skillKey);
+        } else if (promptType === 'event-check') {
+          await handleEventSkillRoll(message, skillKey);
+        }
+      } finally {
+        btn.disabled = false;
+      }
+    });
+  }
 }

@@ -139,6 +139,38 @@ export function renderEventResult({ event, actorName, skillName, rollTotal, effe
 }
 
 /**
+ * Skill-Prompt Card — player clicks one of two skill buttons to roll.
+ * Used for Marching Test (Guide) and for Event checks (affected role).
+ */
+export function renderSkillPromptCard({ actor, role, skill1, skill1Mod, skill2, skill2Mod, dc, context, flavor, promptId }) {
+  const fmt = (m) => (m >= 0 ? `+${m}` : `${m}`);
+  return `
+<div class="pf2e chat-card item-card" data-module="${MODULE_ID}" data-type="skill-prompt" data-prompt-id="${escHtml(promptId)}">
+  <header class="card-header flexrow">
+    <img src="icons/skills/trades/navigation-map.webp" alt="Skill Check" />
+    <h3>${escHtml(context)}</h3>
+  </header>
+  <section class="tags paizo-style">
+    <span class="tag">${escHtml(actor)}</span>
+    <span class="tag rarity uncommon">${escHtml(role)}</span>
+    <span class="tag">DC ${dc}</span>
+  </section>
+  <section class="card-content">
+    <p><em>${escHtml(flavor)}</em></p>
+    <p>Wähle deinen Skill:</p>
+  </section>
+  <section class="card-buttons">
+    <button type="button" data-action="orj-skill-roll" data-skill="${escHtml(skill1)}">
+      <i class="fa-solid fa-dice-d20"></i> ${escHtml(skill1.charAt(0).toUpperCase() + skill1.slice(1))} (${fmt(skill1Mod)})
+    </button>
+    <button type="button" data-action="orj-skill-roll" data-skill="${escHtml(skill2)}">
+      <i class="fa-solid fa-dice-d20"></i> ${escHtml(skill2.charAt(0).toUpperCase() + skill2.slice(1))} (${fmt(skill2Mod)})
+    </button>
+  </section>
+</div>`.trim();
+}
+
+/**
  * Event-hex trigger card — posted when party enters a black hex.
  */
 export function renderEventHexCard({ eventNote }) {

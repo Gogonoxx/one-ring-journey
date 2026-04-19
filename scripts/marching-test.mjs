@@ -16,7 +16,7 @@ import { getHexTerrain } from './hex-painter.mjs';
 import { getRoute } from './route-planner.mjs';
 import { findPartyToken, advancePartyToken, getPartyPositionIndex } from './party-token.mjs';
 import { rollAffectedRole, getEffectiveDC } from './event-roller.mjs';
-import { renderMarchingTestCard, renderEventStage1, renderEventHexCard } from './chat-cards.mjs';
+import { renderMarchingTestCard, renderEventStage1, renderEventHexCard, renderSkillPromptCard } from './chat-cards.mjs';
 
 /**
  * Return the current role → actorId map. Empty object if nothing assigned.
@@ -111,7 +111,7 @@ export async function startMarchingTest() {
     return;
   }
 
-  // 3. Guide rolls
+  // 3. Post skill-prompt card for Guide player (they click their own button to roll)
   const guideActor = game.actors.get(roles.guide);
   if (!guideActor) {
     ui.notifications.error('Journey: Guide-Actor nicht gefunden.');
@@ -124,18 +124,77 @@ export async function startMarchingTest() {
   const currentTerrain = getHexTerrain(currentHex) || 'yellow';
   const dc = getEffectiveDC(currentTerrain, 0);
 
-  // Let the guide player choose skill, then roll
-  const skillKey = await promptSkillChoice(guideActor, ROLES.guide);
-  if (!skillKey) return;
+  const promptId = `marching-${foundry.utils.randomID()}`;
+  const skill1 = ROLES.guide.skills[0];
+  const skill2 = ROLES.guide.skills[1];
+  const skill1Mod = (guideActor.skills?.[skill1] ?? guideActor.perception)?.mod ?? 0;
+  const skill2Mod = (guideActor.skills?.[skill2] ?? guideActor.perception)?.mod ?? 0;
 
-  const roll = await performSkillRoll(guideActor, skillKey, dc, `Marching Test (${TERRAINS[currentTerrain].label})`);
+  await ChatMessage.create({
+    speaker: ChatMessage.getSpeaker({ actor: guideActor }),
+    content: renderSkillPromptCard({
+      actor: guideActor.name,
+      role: ROLES.guide.label,
+      skill1, skill1Mod, skill2, skill2Mod,
+      dc,
+      context: `Marching Test (${TERRAINS[currentTerrain].label})`,
+      flavor: `${guideActor.name} führt die Gruppe durch das ${TERRAINS[currentTerrain].label}.`,
+      promptId,
+    }),
+    flags: {
+      [MODULE_ID]: {
+        promptType: 'marching-test',
+        promptId,
+        actorId: guideActor.id,
+        dc,
+        terrainKey: currentTerrain,
+      },
+    },
+  });
+  // Execution continues via handleMarchingRoll() when the player clicks
+}
+
+/**
+ * Called from event-interaction when Guide clicks a skill button on a
+ * marching-test prompt card. Performs the roll and runs the full
+ * post-roll flow (token advance + event phase).
+ */
+export async function handleMarchingRoll(message, skillKey) {
+  const flags = message.flags?.[MODULE_ID];
+  if (!flags || flags.promptType !== 'marching-test') return;
+
+  const guideActor = game.actors.get(flags.actorId);
+  if (!guideActor) return;
+
+  // Only the Guide's owner (or GM) can roll
+  if (!guideActor.isOwner) {
+    ui.notifications.warn('Nur der Guide-Spieler kann diesen Check würfeln.');
+    return;
+  }
+
+  const currentTerrain = flags.terrainKey || 'yellow';
+  const dc = flags.dc;
+  const roll = await performSkillRoll(
+    guideActor,
+    skillKey,
+    dc,
+    `Marching Test (${TERRAINS[currentTerrain].label})`,
+  );
   if (!roll) return;
+
+  // Consume the prompt so it can't be clicked again
+  try {
+    await message.delete();
+  } catch (err) {
+    // If players can't delete the message, just mark it
+    await message.update({ flags: { [MODULE_ID]: { ...flags, consumed: true } } });
+  }
 
   const dos = roll.degreeOfSuccess ?? deriveDoSFromRoll(roll, dc);
   const outcome = MARCHING_RESULT[dos];
   const hexes = outcome.hexes;
 
-  // 4. Post result card & animate advance
+  // Post result card
   await ChatMessage.create({
     speaker: ChatMessage.getSpeaker({ actor: guideActor }),
     content: renderMarchingTestCard({
@@ -146,6 +205,21 @@ export async function startMarchingTest() {
     }),
   });
 
+  // Continue with token advance + event phase (GM-only from here on)
+  if (!game.user.isGM) {
+    // Ask GM to continue via socket? Simplest: have GM observe and continue.
+    // For now, only run the rest if this client IS the GM.
+    ui.notifications.info('Der GM setzt die Reise fort...');
+    return;
+  }
+
+  await continueAfterMarching(hexes, roles => roles, guideActor);
+}
+
+// Separate helper so both the direct flow (legacy) and the new button
+// flow can share the post-roll steps.
+async function continueAfterMarching(hexes, _unused, _guideActor) {
+  const roles = getRoleAssignments();
   const result = await advancePartyToken(hexes);
 
   // 5. Handle arrival
