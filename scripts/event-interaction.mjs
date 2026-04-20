@@ -15,6 +15,7 @@ import {
   adjustNextMarchingModifier, regenerateBurntHitDiceForActor,
   decreaseDrainedOnActor, getBurntHitDice, getDrainedValueForActor,
 } from './hit-dice-bridge.mjs';
+import { requestGMAction } from './gm-socket.mjs';
 
 function getFlags(message) {
   return message.getFlag(MODULE_ID, 'stage') !== undefined
@@ -179,21 +180,53 @@ async function handleEventSkillRoll(message, skillKey) {
   );
   if (!rollResult) return;
 
-  // Consume the prompt
-  try {
-    await message.delete();
-  } catch (err) {
-    await message.update({ flags: { [MODULE_ID]: { ...flags, consumed: true } } });
-  }
-
+  // Roll is done client-side (player's Dice So Nice etc.). Everything after —
+  // deleting the prompt, writing flags on other actors, scene-flag writes for
+  // pending modifiers, posting result cards — needs GM permissions. Hand off.
   const dos = rollResult.degreeOfSuccess ?? deriveDoSFromTotal(rollResult.total, effectiveDC, rollResult.rawRoll);
+
+  await requestGMAction('event-roll-resolved', {
+    messageId: message.id,
+    eventId: flags.eventId,
+    affectedActorId: affectedActor.id,
+    dos,
+    skillName: skillKey,
+    rollTotal: rollResult.total,
+    effectiveDC,
+  });
+}
+
+/**
+ * GM-side handler: runs after a player (or GM) rolls an event skill check.
+ * Deletes the prompt, applies consequences, posts result card.
+ */
+export async function resolveEventRoll(payload) {
+  if (!game.user.isGM) return;
+  const { messageId, eventId, affectedActorId, dos, skillName, rollTotal, effectiveDC } = payload.data ?? {};
+
+  const message = game.messages.get(messageId);
+  const flags = message?.flags?.[MODULE_ID];
+  const event = EVENTS[eventId];
+  const affectedActor = game.actors.get(affectedActorId);
+  if (!event || !affectedActor) return;
+
+  // Consume the prompt
+  if (message) {
+    try {
+      await message.delete();
+    } catch (err) {
+      if (flags) {
+        await message.update({ flags: { [MODULE_ID]: { ...flags, consumed: true } } });
+      }
+    }
+  }
 
   await applyConsequences({
     event,
     affectedActor,
     dos,
-    skillName: skillKey,
-    rollTotal: rollResult.total,
+    skillName,
+    rollTotal,
     effectiveDC,
   });
 }

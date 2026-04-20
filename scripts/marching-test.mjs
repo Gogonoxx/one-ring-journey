@@ -18,6 +18,7 @@ import { findPartyToken, advancePartyToken, getPartyPositionIndex } from './part
 import { rollAffectedRole, getEffectiveDC } from './event-roller.mjs';
 import { renderMarchingTestCard, renderEventStage1, renderEventHexCard, renderSkillPromptCard } from './chat-cards.mjs';
 import { getNextMarchingModifier, clearNextMarchingModifier } from './hit-dice-bridge.mjs';
+import { requestGMAction } from './gm-socket.mjs';
 
 /**
  * Return the current role → actorId map. Empty object if nothing assigned.
@@ -183,14 +184,44 @@ export async function handleMarchingRoll(message, skillKey) {
   );
   if (!rollResult) return;
 
+  // Roll is done on the player's client (with their Dice So Nice etc.).
+  // Everything after this requires GM permissions (scene flags, token movement,
+  // deleting the prompt card). Hand off to the GM via socket.
+  const dos = rollResult.degreeOfSuccess ?? deriveDoSFromTotal(rollResult.total, dc, rollResult.rawRoll);
+
+  await requestGMAction('marching-roll-resolved', {
+    messageId: message.id,
+    guideActorId: guideActor.id,
+    terrainKey: currentTerrain,
+    dos,
+  });
+}
+
+/**
+ * GM-side handler: runs after a player (or GM) rolls a marching test.
+ * Deletes the prompt card, posts the result, advances the token, and
+ * starts the event phase. Only the active GM executes this.
+ */
+export async function resolveMarchingRoll(payload) {
+  const { messageId, guideActorId, terrainKey, dos } = payload.data ?? {};
+  if (!game.user.isGM) return;
+
+  const message = game.messages.get(messageId);
+  const flags = message?.flags?.[MODULE_ID];
+  const guideActor = game.actors.get(guideActorId);
+  if (!guideActor) return;
+
   // Consume the prompt so it can't be clicked again
-  try {
-    await message.delete();
-  } catch (err) {
-    await message.update({ flags: { [MODULE_ID]: { ...flags, consumed: true } } });
+  if (message) {
+    try {
+      await message.delete();
+    } catch (err) {
+      if (flags) {
+        await message.update({ flags: { [MODULE_ID]: { ...flags, consumed: true } } });
+      }
+    }
   }
 
-  const dos = rollResult.degreeOfSuccess ?? deriveDoSFromTotal(rollResult.total, dc, rollResult.rawRoll);
   const outcome = MARCHING_RESULT[dos];
 
   // Apply pending modifier from previous event (Mishap = -1, Short Cut = +1)
@@ -205,19 +236,11 @@ export async function handleMarchingRoll(message, skillKey) {
     speaker: ChatMessage.getSpeaker({ actor: guideActor }),
     content: renderMarchingTestCard({
       guide: guideActor.name,
-      terrain: TERRAINS[currentTerrain],
+      terrain: TERRAINS[terrainKey],
       outcome: dos,
       hexesAdvanced: hexes,
     }),
   });
-
-  // Continue with token advance + event phase (GM-only from here on)
-  if (!game.user.isGM) {
-    // Ask GM to continue via socket? Simplest: have GM observe and continue.
-    // For now, only run the rest if this client IS the GM.
-    ui.notifications.info('Der GM setzt die Reise fort...');
-    return;
-  }
 
   await continueAfterMarching(hexes, roles => roles, guideActor);
 }

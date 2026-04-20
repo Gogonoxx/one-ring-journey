@@ -22,9 +22,9 @@ import {
   PARTY_TOKEN_NAME_SETTING,
   resetPartyPosition,
 } from './party-token.mjs';
-import { startMarchingTest, promptRoleAssignment, getRoleAssignments } from './marching-test.mjs';
-import { wireJourneyCardListeners } from './event-interaction.mjs';
-import { registerGMSocket } from './gm-socket.mjs';
+import { startMarchingTest, promptRoleAssignment, getRoleAssignments, resolveMarchingRoll } from './marching-test.mjs';
+import { wireJourneyCardListeners, resolveEventRoll } from './event-interaction.mjs';
+import { registerGMSocket, registerGMHandler } from './gm-socket.mjs';
 
 // === Settings ===
 Hooks.once('init', () => {
@@ -51,6 +51,9 @@ Hooks.once('ready', () => {
   }
   // Wire up GM socket relay so players can request route updates
   registerGMSocket();
+  // Register handlers that process player-side skill-roll results on the GM
+  registerGMHandler('marching-roll-resolved', resolveMarchingRoll);
+  registerGMHandler('event-roll-resolved', resolveEventRoll);
 });
 
 // === Scene Controls ===
